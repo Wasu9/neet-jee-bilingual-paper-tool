@@ -1,7 +1,7 @@
 """
-NEET / JEE Bilingual Paper Maker
-English → Hindi (side-by-side Word) for DTP / Paper Setting
-Stable version with retry, better splitting & math protection
+NEET / JEE Bilingual Paper Maker v2.1
+English → Hindi side-by-side Word generator for DTP
+Compatible with Python 3.12+ / Streamlit Cloud (no googletrans / cgi issue)
 """
 
 import streamlit as st
@@ -15,9 +15,9 @@ import io
 import re
 import time
 import traceback
+import requests
 from typing import List, Tuple, Dict
 
-# ---------------- Page Config ----------------
 st.set_page_config(
     page_title="NEET/JEE Bilingual Paper Maker",
     page_icon="📝",
@@ -26,52 +26,51 @@ st.set_page_config(
 )
 
 st.title("📝 NEET / JEE Bilingual Paper Maker")
-st.caption("English → Hindi side-by-side Word generator for DTP | Math & special characters protected")
+st.caption("English → Hindi side-by-side Word | Math protected | Streamlit Cloud compatible")
 
-# ---------------- Translator (with retry) ----------------
-@st.cache_resource
-def get_translator():
-    from googletrans import Translator
-    return Translator()
-
-def translate_with_retry(text: str, max_retries: int = 4) -> str:
-    """Translate English → Hindi with exponential backoff"""
+def google_translate(text: str, source: str = "en", target: str = "hi", max_retries: int = 4) -> str:
     if not text or not text.strip():
         return text
 
-    translator = get_translator()
     protected, placeholders = protect_math(text)
+    url = "https://translate.googleapis.com/translate_a/single"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
 
     for attempt in range(max_retries):
         try:
-            # googletrans has limit around 5k chars
-            if len(protected) > 4500:
-                # Split by sentences / lines
+            if len(protected) > 4200:
                 chunks = split_long_text(protected, 4000)
                 results = []
                 for chunk in chunks:
-                    res = translator.translate(chunk, src='en', dest='hi')
-                    results.append(res.text if res and res.text else chunk)
-                    time.sleep(0.35)
-                translated = " ".join(results)
+                    params = {"client": "gtx", "sl": source, "tl": target, "dt": "t", "q": chunk}
+                    r = requests.get(url, params=params, headers=headers, timeout=15)
+                    r.raise_for_status()
+                    data = r.json()
+                    translated_chunk = "".join([item[0] for item in data[0] if item[0]])
+                    results.append(translated_chunk)
+                    time.sleep(0.3)
+                translated = "".join(results)
             else:
-                res = translator.translate(protected, src='en', dest='hi')
-                translated = res.text if res and res.text else protected
+                params = {"client": "gtx", "sl": source, "tl": target, "dt": "t", "q": protected}
+                r = requests.get(url, params=params, headers=headers, timeout=15)
+                r.raise_for_status()
+                data = r.json()
+                translated = "".join([item[0] for item in data[0] if item[0]])
 
             return restore_math(translated, placeholders)
 
-        except Exception as e:
-            wait = (2 ** attempt) + 0.5
+        except Exception:
+            wait = (1.5 ** attempt) + 0.4
             if attempt < max_retries - 1:
                 time.sleep(wait)
             else:
-                # Last attempt failed → return original
                 return text
     return text
 
 
 def split_long_text(text: str, max_len: int = 4000) -> List[str]:
-    """Split long text into chunks without breaking mid-sentence if possible"""
     if len(text) <= max_len:
         return [text]
     chunks = []
@@ -88,32 +87,21 @@ def split_long_text(text: str, max_len: int = 4000) -> List[str]:
     return chunks
 
 
-# ---------------- Math / Symbol Protection ----------------
 def protect_math(text: str) -> Tuple[str, Dict[str, str]]:
-    """Protect LaTeX, equations, special math symbols from translation"""
     placeholders = {}
     counter = [0]
-
     def repl(match):
-        key = f"__MATH{counter[0]}__"
+        key = f"__M{counter[0]}__"
         placeholders[key] = match.group(0)
         counter[0] += 1
         return key
-
-    # Order matters – more specific first
     patterns = [
-        r'\$\$[\s\S]+?\$\$',                    # $$ ... $$
-        r'\$[^$\n]+\$',                         # $ ... $
-        r'\\[a-zA-Z]+\{[^}]*\}',                # \frac{ }{ }, \sqrt{} etc
-        r'\\[a-zA-Z]+',                         # \alpha, \beta, \pi
+        r'\$\$[\s\S]+?\$\$', r'\$[^$\n]+\$', r'\\[a-zA-Z]+\{[^}]*\}', r'\\[a-zA-Z]+',
         r'[√≤≥≠≈≡∞∂∇∫∑∏πΔδθωαβγλμρσφψΩ±×÷→←↔⇒⇐⇔°′″†‡]',
-        r'\b[A-Za-z]̂\b',                       # î ĵ k̂
-        r'[a-zA-Z]⃗|[a-zA-Z]̅',                 # vector / bar
+        r'[a-zA-Z]̂', r'[a-zA-Z]⃗', r'[a-zA-Z]̅',
     ]
-
     for pat in patterns:
         text = re.sub(pat, repl, text)
-
     return text, placeholders
 
 
@@ -123,7 +111,6 @@ def restore_math(text: str, placeholders: Dict[str, str]) -> str:
     return text
 
 
-# ---------------- Text Extraction ----------------
 def extract_from_pdf(file) -> str:
     text_parts = []
     with pdfplumber.open(file) as pdf:
@@ -145,40 +132,24 @@ def extract_from_docx(file) -> str:
     return "\n\n".join(paras)
 
 
-# ---------------- Smart Chunking for Exam Papers ----------------
 def smart_split_exam_text(text: str) -> List[str]:
-    """
-    Split exam paper into logical units:
-    - Header / instructions
-    - Each question (starts with number.)
-    """
-    # Normalize
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-
-    # Split on question numbers like "1. ", "12. ", "Q1.", "Q.1" etc.
     pattern = r'(?=\n\s*(?:\d{1,3}|Q\.?\s*\d{1,3})[\.\)]\s)'
     parts = re.split(pattern, text)
-
     chunks = []
     for p in parts:
         p = p.strip()
         if not p:
             continue
-        # Further split very long chunks
         if len(p) > 1800:
-            sub = split_long_text(p, 1600)
-            chunks.extend(sub)
+            chunks.extend(split_long_text(p, 1600))
         else:
             chunks.append(p)
-
-    # If almost no splits happened, fallback to paragraph split
     if len(chunks) <= 2 and len(text) > 2000:
         chunks = [c.strip() for c in text.split("\n\n") if c.strip()]
-
     return chunks
 
 
-# ---------------- DOCX Creation ----------------
 def set_run_font(run, font_name: str = "Mangal", size: int = 10, bold: bool = False):
     run.font.name = font_name
     run._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
@@ -186,12 +157,8 @@ def set_run_font(run, font_name: str = "Mangal", size: int = 10, bold: bool = Fa
     run.bold = bold
 
 
-def create_bilingual_docx(
-    eng_chunks: List[str],
-    hin_chunks: List[str],
-    title: str = "NEET / JEE Bilingual Question Paper"
-) -> bytes:
-
+def create_bilingual_docx(eng_chunks: List[str], hin_chunks: List[str],
+                          title: str = "NEET / JEE Bilingual Question Paper") -> bytes:
     doc = Document()
     section = doc.sections[0]
     section.page_width = Cm(21.0)
@@ -201,7 +168,6 @@ def create_bilingual_docx(
     section.left_margin = Cm(1.0)
     section.right_margin = Cm(1.0)
 
-    # Title
     tp = doc.add_paragraph()
     r = tp.add_run(title)
     r.bold = True
@@ -213,17 +179,14 @@ def create_bilingual_docx(
     r2.font.size = Pt(11)
     sp.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    # Main table
     table = doc.add_table(rows=1, cols=2)
     table.style = "Table Grid"
     table.autofit = False
-
     for cell in table.columns[0].cells:
         cell.width = Cm(9.2)
     for cell in table.columns[1].cells:
         cell.width = Cm(9.2)
 
-    # Header
     hdr = table.rows[0].cells
     hdr[0].text = "English"
     hdr[1].text = "हिन्दी"
@@ -237,35 +200,24 @@ def create_bilingual_docx(
         shading.set(qn("w:fill"), "D6EAF8")
         cell._tc.get_or_add_tcPr().append(shading)
 
-    # Content
     n = max(len(eng_chunks), len(hin_chunks))
     for i in range(n):
         eng = eng_chunks[i] if i < len(eng_chunks) else ""
         hin = hin_chunks[i] if i < len(hin_chunks) else ""
-
         row = table.add_row()
-
-        # English cell
         p0 = row.cells[0].paragraphs[0]
         run0 = p0.add_run(eng)
         run0.font.name = "Times New Roman"
         run0.font.size = Pt(9)
         p0.paragraph_format.space_after = Pt(3)
-
-        # Hindi cell
         p1 = row.cells[1].paragraphs[0]
         run1 = p1.add_run(hin)
         set_run_font(run1, "Mangal", 9)
         p1.paragraph_format.space_after = Pt(3)
 
-    # Footer note
     doc.add_paragraph()
     note = doc.add_paragraph()
-    nr = note.add_run(
-        "Note: Math equations & special characters are preserved. "
-        "Please review NCERT scientific terminology for final accuracy. "
-        "Generated for DTP / Paper setting use."
-    )
+    nr = note.add_run("Note: Math equations & special characters are preserved. Please review NCERT scientific terminology. Generated for DTP use.")
     nr.font.size = Pt(8)
     nr.italic = True
 
@@ -275,109 +227,56 @@ def create_bilingual_docx(
     return buffer.getvalue()
 
 
-# ---------------- UI ----------------
 with st.sidebar:
     st.header("⚙️ Settings")
-    input_mode = st.radio(
-        "Input Type",
-        ["Paste Text", "Upload DOCX", "Upload PDF"],
-        index=2
-    )
+    input_mode = st.radio("Input Type", ["Paste Text", "Upload DOCX", "Upload PDF"], index=2)
     st.markdown("---")
-    st.markdown("**Tips for best results**")
-    st.markdown("""
-- Math ko `$E=mc^2$` ya `$$...$$` me likho
-- PDF text-based hona chahiye (scanned + OCR pehle kar lo)
-- Graphs / diagrams alag se daalne padenge
-- Bahut lamba paper ho to 5-10 min lag sakte hain
-    """)
-    st.markdown("---")
-    st.markdown("**Version:** 2.0 (Stable)")
+    st.markdown("**v2.1** · No googletrans · Python 3.14 ready")
 
 english_text = ""
 
 if input_mode == "Paste Text":
-    english_text = st.text_area(
-        "English paper content paste karein:",
-        height=320,
-        placeholder="1. For a body moving along x-axis...\n\n(1) speed (2) distance..."
-    )
+    english_text = st.text_area("English content paste karein:", height=320)
 elif input_mode == "Upload DOCX":
-    uploaded = st.file_uploader("English DOCX upload karein", type=["docx"])
+    uploaded = st.file_uploader("English DOCX", type=["docx"])
     if uploaded:
-        with st.spinner("DOCX se text nikal raha hoon..."):
+        with st.spinner("Extracting..."):
             english_text = extract_from_docx(uploaded)
-            st.success(f"Extracted {len(english_text)} characters")
-            with st.expander("Preview (first 1500 chars)"):
-                st.text(english_text[:1500] + ("..." if len(english_text) > 1500 else ""))
+            st.success(f"{len(english_text)} characters")
 elif input_mode == "Upload PDF":
-    uploaded = st.file_uploader("English PDF upload karein (text-based)", type=["pdf"])
+    uploaded = st.file_uploader("English PDF", type=["pdf"])
     if uploaded:
-        with st.spinner("PDF se text nikal raha hoon..."):
+        with st.spinner("Extracting..."):
             english_text = extract_from_pdf(uploaded)
-            st.success(f"Extracted {len(english_text)} characters from PDF")
-            with st.expander("Preview (first 1500 chars)"):
-                st.text(english_text[:1500] + ("..." if len(english_text) > 1500 else ""))
+            st.success(f"{len(english_text)} characters")
 
 if english_text.strip():
     st.markdown("---")
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        st.subheader("English Preview")
-        st.text_area("en_preview", english_text, height=220, disabled=True, label_visibility="collapsed")
+    st.text_area("Preview", english_text, height=180, disabled=True)
 
     if st.button("🚀 Translate & Generate Bilingual Word", type="primary", use_container_width=True):
-        start_time = time.time()
+        start = time.time()
         status = st.empty()
         progress = st.progress(0)
-
         try:
-            status.info("Step 1/3 → Smart splitting questions...")
+            status.info("Splitting questions...")
             eng_chunks = smart_split_exam_text(english_text)
             progress.progress(0.1)
-
-            status.info(f"Step 2/3 → Translating {len(eng_chunks)} parts to Hindi... (please wait)")
+            status.info(f"Translating {len(eng_chunks)} parts...")
             hin_chunks = []
-            total = len(eng_chunks)
-
             for i, chunk in enumerate(eng_chunks):
-                hin = translate_with_retry(chunk)
+                hin = google_translate(chunk)
                 hin_chunks.append(hin)
-                progress.progress(0.1 + 0.8 * (i + 1) / total)
-                status.info(f"Translating... {i+1}/{total} parts done")
-
-            status.info("Step 3/3 → Creating Word document...")
-            progress.progress(0.95)
-
-            docx_bytes = create_bilingual_docx(
-                eng_chunks,
-                hin_chunks,
-                title="NEET / JEE Bilingual Question Paper"
-            )
-
+                progress.progress(0.1 + 0.8 * (i + 1) / len(eng_chunks))
+                status.info(f"Translating... {i+1}/{len(eng_chunks)}")
+            status.info("Creating Word file...")
+            docx_bytes = create_bilingual_docx(eng_chunks, hin_chunks)
             progress.progress(1.0)
-            elapsed = time.time() - start_time
-            status.success(f"✅ Ready! Time taken: {elapsed:.1f} seconds | {len(eng_chunks)} parts translated")
-
-            st.download_button(
-                label="📥 Download Bilingual DOCX",
-                data=docx_bytes,
-                file_name="bilingual_neet_jee_paper.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True
-            )
-
-            # Quick preview of first few
-            with st.expander("Quick Side-by-Side Preview (first 4 parts)"):
-                for e, h in zip(eng_chunks[:4], hin_chunks[:4]):
-                    st.markdown(f"**EN:** {e[:180]}{'...' if len(e)>180 else ''}")
-                    st.markdown(f"**HI:** {h[:180]}{'...' if len(h)>180 else ''}")
-                    st.markdown("---")
-
-        except Exception as e:
-            status.error("Error aaya. Details below:")
+            status.success(f"✅ Done in {time.time()-start:.1f}s")
+            st.download_button("📥 Download Bilingual DOCX", data=docx_bytes,
+                               file_name="bilingual_neet_jee_paper.docx",
+                               mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                               use_container_width=True)
+        except Exception:
+            status.error("Error")
             st.code(traceback.format_exc())
-            st.warning("Agar rate-limit aaye to thoda wait karke phir se try karein.")
-
-st.markdown("---")
-st.caption("Made for Indian coaching DTP operators | Math protected | NCERT terms review recommended")
