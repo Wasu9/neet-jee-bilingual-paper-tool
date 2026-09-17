@@ -1,72 +1,28 @@
-# NEET / JEE Bilingual Paper Maker (v2.0 Stable)
+# NEET / JEE Bilingual Paper Maker (v2.1)
 
-**English → Hindi Side-by-Side Word Generator for DTP & Paper Setters**
+**English → Hindi Side-by-Side Word Generator for DTP**
 
-Upload ready-made English NEET/JEE paper → Get clean bilingual DOCX  
-(Left: English | Right: Hindi) in table format.
+## Fixed in v2.1
+- ✅ Removed `googletrans` (was breaking on Python 3.13/3.14 because of removed `cgi` module)
+- ✅ Pure `requests`-based Google Translate (works on Streamlit Cloud)
+- ✅ Retry + backoff
+- ✅ Math / symbol protection
+- ✅ Smart question splitting
 
-## What’s New in v2.0
-- ✅ **Reliable translation** (googletrans + retry + exponential backoff)
-- ✅ Smart question-wise splitting (detects `1. `, `12. `, `Q1.` etc.)
-- ✅ Math, equations, vectors, special symbols **protected**
-- ✅ Progress bar + clear status messages
-- ✅ Better Hindi font handling (Mangal)
-- ✅ Handles long papers better
-
-## How to Run (Local)
-
+## Run Locally
 ```bash
-git clone https://github.com/YOUR_USERNAME/neet-jee-bilingual-paper-tool.git
-cd neet-jee-bilingual-paper-tool
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Browser opens at `http://localhost:8501`
-
-## Deploy Free Website
-
-### Streamlit Cloud (Recommended)
+## Deploy on Streamlit Cloud
 1. Push this repo to GitHub
-2. Go to → https://share.streamlit.io
-3. Connect GitHub → Select this repo → Deploy
-4. Public URL mil jayega
+2. Go to https://share.streamlit.io
+3. Deploy → Public URL ready
 
-## Usage Tips (DTP Operators)
+## Usage
+1. Upload PDF / DOCX or paste text
+2. Click **Translate & Generate**
+3. Download bilingual Word file
 
-1. **Best Input**
-   - Text-based PDF (not scanned)
-   - Or DOCX / plain text
-
-2. **Math Protection**
-   - Equations written as `$E = mc^2$` or `$$...$$` stay untouched
-   - Vectors, √, π, α, β etc. are protected
-
-3. **After Download**
-   - Open in Word / LibreOffice
-   - Check NCERT scientific terms (force → बल, acceleration → त्वरण etc. usually correct)
-   - Insert diagrams / graphs manually (tool extracts only text)
-
-4. **Long Papers**
-   - 20-25 page paper usually takes 4–10 minutes
-   - Progress bar dikhega
-
-## Project Structure
-```
-neet-jee-bilingual-paper-tool/
-├── app.py
-├── requirements.txt
-├── README.md
-└── .gitignore
-```
-
-## Limitations
-- Graphs / images / complex figures not extracted (text only)
-- Very heavy rate-limit from Google can still happen (retry automatically tries 4 times)
-- NCERT exact terminology should be reviewed once
-
-## License
-MIT – Free for personal & commercial use (coaching institutes welcome)
-
----
-Made for Indian coaching teachers & DTP operators.
+**Note:** Graphs/diagrams need to be added manually after download.
